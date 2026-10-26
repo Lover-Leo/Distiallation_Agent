@@ -1,6 +1,6 @@
 import {spawn} from 'node:child_process';
 const port=18765;
-const child=spawn(process.execPath,['src/server.mjs'],{env:{...process.env,PORT:String(port),BASELINE_DIR:'outputs/local-baseline-v1'},stdio:['ignore','pipe','pipe']});
+const child=spawn(process.execPath,['src/server.mjs'],{env:{...process.env,PORT:String(port),BASELINE_DIR:'outputs/local-baseline-v1',CHAT_PROVIDER:'local'},stdio:['ignore','pipe','pipe']});
 try {
   await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);child.once('exit',()=>reject(Error('Server exited')));setTimeout(()=>reject(Error('Startup timeout')),10000).unref();});
   const base=`http://127.0.0.1:${port}`;

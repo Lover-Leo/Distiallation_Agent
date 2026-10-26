@@ -1,32 +1,30 @@
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { retrieve } from './pipeline.mjs';
-import {searchIndex} from './local-baseline.mjs';
+import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
+import {retrieve} from './pipeline.mjs';
+import {searchIndex} from './local-baseline.mjs';
+import {loadLocalEnv, deepseekConfig} from './config.mjs';
+import {createChatService} from './chat-service.mjs';
+import {createApp} from './http-app.mjs';
+
+await loadLocalEnv();
 const baselineDir = process.env.BASELINE_DIR;
-const dataset = baselineDir ? {splits:{train:(await readFile(resolve(baselineDir,'train.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))}} : JSON.parse(await readFile(new URL('../outputs/demo/dataset.json', import.meta.url), 'utf8'));
-const index = baselineDir ? JSON.parse(await readFile(resolve(baselineDir,'index.json'),'utf8')) : null;
-const profile = baselineDir ? JSON.parse(await readFile(resolve(baselineDir,'profile.json'),'utf8')) : null;
-const html = await readFile(new URL(baselineDir?'./web/local.html':'./web/index.html', import.meta.url));
+const useDeepseek = process.env.CHAT_PROVIDER === 'deepseek';
+if (useDeepseek && !baselineDir) throw Error('DeepSeek 模式需要指定 BASELINE_DIR。');
+const samples = baselineDir
+  ? (await readFile(resolve(baselineDir, 'train.jsonl'), 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
+  : JSON.parse(await readFile(new URL('../outputs/demo/dataset.json', import.meta.url), 'utf8')).splits.train;
+const index = baselineDir ? JSON.parse(await readFile(resolve(baselineDir, 'index.json'), 'utf8')) : null;
+const profile = baselineDir ? JSON.parse(await readFile(resolve(baselineDir, 'profile.json'), 'utf8')) : null;
+const find = message => baselineDir ? searchIndex(index, samples, message).map(({sample}) => sample) : retrieve(samples, message);
+const initialSessions = useDeepseek && process.env.CHAT_SESSION_IMPORT ? JSON.parse(await readFile(resolve(process.env.CHAT_SESSION_IMPORT), 'utf8')) : [];
+const chat = useDeepseek ? createChatService({config: deepseekConfig(), profile, retrieve: find, initialSessions}) : null;
+const page = useDeepseek ? './web/chat.html' : baselineDir ? './web/local.html' : './web/index.html';
+const html = () => readFile(new URL(page, import.meta.url));
+await html();
 const port = Number(process.env.PORT || 8765);
-const server = http.createServer(async (req, res) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'");
-  if (req.headers.host !== `127.0.0.1:${port}` && req.headers.host !== `localhost:${port}`) { res.writeHead(403); res.end(); return; }
-  if (req.method === 'GET' && req.url === '/') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(html); return; }
-  if (req.method === 'GET' && req.url === '/api/profile' && profile) {res.setHeader('Content-Type','application/json; charset=utf-8');res.end(JSON.stringify(profile));return;}
-  if (req.method !== 'POST' || req.url !== '/api/chat') { res.writeHead(404); res.end(); return; }
-  if (req.headers.origin && ![`http://127.0.0.1:${port}`, `http://localhost:${port}`].includes(req.headers.origin)) { res.writeHead(403); res.end(); return; }
-  try {
-    let body = '';
-    for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 16384) throw new Error('too large'); }
-    const { message } = JSON.parse(body);
-    if (typeof message !== 'string' || !message.trim() || message.length > 2000) throw new Error('invalid message');
-    const matches = baselineDir ? searchIndex(index,dataset.splits.train,message).map(({sample,score})=>({...sample,score})) : retrieve(dataset.splits.train, message);
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ reply: baselineDir ? '以下为训练部分的真实历史示例，未生成新回复。' : matches.length ? '找到以下虚构参考示例。尚未接入语言模型，因此此处不生成模拟回复。' : '训练部分没有相关示例。尚未接入语言模型。', evidence: matches.map(m => ({ id: m.id, text: m.messages.at(-1).content, context: baselineDir?m.messages.at(-2).content:undefined, day:m.day, sources:baselineDir?m.messages.at(-1).evidence:undefined })) }));
-  } catch { res.writeHead(400); res.end(JSON.stringify({ error: '请求无效，请输入 1—2000 字的消息。' })); }
-});
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error('PORT 必须为有效端口。');
+const server = http.createServer(createApp({port, html, profile, retrieve: find, chat}));
 server.requestTimeout = 15000;
-server.listen(port, '127.0.0.1', () => console.log(`${baselineDir?'本地真实数据检索':'虚构数据演示'}：http://127.0.0.1:${port}`));
+server.listen(port, '127.0.0.1', () => console.log(`${useDeepseek ? 'DeepSeek 风格聊天' : baselineDir ? '本地真实数据检索' : '虚构数据演示'}：http://127.0.0.1:${port}`));
+server.on('error', error => {console.error(error.code === 'EADDRINUSE' ? '端口已占用，请停止旧服务或设置 PORT。' : '本地服务启动失败。'); process.exitCode = 1;});
