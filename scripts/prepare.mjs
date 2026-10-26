@@ -1,0 +1,10 @@
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { prepare } from '../src/pipeline.mjs';
+const [input, target, output] = process.argv.slice(2);
+if (!input || !target || !output) throw new Error('用法：node scripts/prepare.mjs 输入.json 目标sender_id 输出目录');
+if (resolve(input) === resolve(output, 'dataset.json')) throw new Error('输出不得覆盖原始文件');
+const result = prepare(JSON.parse(await readFile(input, 'utf8')), target);
+await mkdir(output, { recursive: true });
+await writeFile(resolve(output, 'dataset.json'), JSON.stringify(result, null, 2), { flag: 'wx' });
+console.log(JSON.stringify(result.report, null, 2));

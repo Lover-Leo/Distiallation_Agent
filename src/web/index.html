@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>个人风格 Agent · 工程演示</title>
+<style>body{font:16px system-ui;max-width:860px;margin:40px auto;padding:0 20px;background:#f4f6fa;color:#172238}h1{font-size:26px}button,select,textarea{font:inherit;padding:10px;border:1px solid #bcc8d8;border-radius:8px}button{cursor:pointer}#history{min-height:300px;margin:20px 0}article{white-space:pre-wrap;background:white;border-radius:12px;padding:16px;margin:12px 0}textarea{width:95%;height:75px}small{color:#59677b}#error{color:#a12626}</style>
+<h1>个人风格 Agent</h1><p>AI 模拟项目 · 仅虚构样本 · 未接入语言模型</p>
+<small>当前验证导入、检索与界面流程；不代表任何真人。会话仅保存在当前页面内，刷新即消失。</small>
+<p><select id="sessions" aria-label="选择会话"></select> <button id="new">新会话</button> <button id="clear">清空当前会话</button></p>
+<main id="history" aria-live="polite"></main><form><textarea maxlength="2000" placeholder="试试：周末、吃饭、电影……" aria-label="输入消息" required></textarea><p><button id="send">发送</button></p></form><p id="error" role="alert"></p>
+<script>
+const chats=new Map();let active;const select=document.querySelector('#sessions'),history=document.querySelector('#history'),input=document.querySelector('textarea'),error=document.querySelector('#error');
+function render(){history.replaceChildren();for(const m of chats.get(active)){const el=document.createElement('article');el.textContent=m;history.append(el);}}
+function add(){active=crypto.randomUUID();chats.set(active,[]);const option=document.createElement('option');option.value=active;option.textContent='会话 '+chats.size;select.append(option);select.value=active;render();}
+document.querySelector('#new').onclick=add;select.onchange=()=>{active=select.value;render();};document.querySelector('#clear').onclick=()=>{chats.set(active,[]);render();};
+document.querySelector('form').onsubmit=async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;const id=active,items=chats.get(id);items.push('你：'+message);input.value='';render();error.textContent='';document.querySelector('#send').disabled=true;try{const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message}),signal:AbortSignal.timeout(15000)});if(!response.ok)throw Error();const data=await response.json();if(chats.get(id)===items)items.push('演示助手：'+data.reply+data.evidence.map(m=>'\n\n虚构示例：'+m.text+'\n证据 ID：'+m.id).join(''));}catch{error.textContent='请求失败，请确认本地服务正在运行后重试。';}finally{document.querySelector('#send').disabled=false;render();}};add();
+</script></html>
